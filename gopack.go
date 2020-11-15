@@ -45,6 +45,10 @@ type ProjectInfo struct {
 }
 
 // MetaData contains paths to meta files such as icon and manifests.
+// TODO: Specify data in a common format (eg, yml).
+// Grab common data author, description, etc and allow for custom data.
+// Then, generate the platform specific files or skip that and directly embed
+// the meta data (eg windows manifest).
 type MetaData struct {
 	Icon   string
 	Darwin struct {
@@ -104,6 +108,7 @@ func (p Packer) Pack() error {
 	if p.MetaData.Icon == "" {
 		fmt.Printf("warning: icon not found (icon.png)")
 	}
+	// TODO: parallelize builds.
 	for _, artifact := range p.Artifacts {
 		dir := filepath.Join(p.Output(), artifact.Platform.String())
 		switch artifact.Platform {

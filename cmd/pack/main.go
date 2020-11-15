@@ -10,6 +10,10 @@ import (
 )
 
 func main() {
+	// TODO:
+	// - Accept dir to binaries, parse binary formats to figure what platform
+	// they are intended for.
+	// - Allow for zero config execution.
 	if err := func() error {
 		var (
 			root string
