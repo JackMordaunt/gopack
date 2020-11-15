@@ -26,7 +26,14 @@ func main() {
 		if len(os.Args) > 3 {
 			name = os.Args[3]
 		}
-		if err := gopack.Pack(root, pkg, name); err != nil {
+		packer := gopack.Packer{
+			Info: &gopack.ProjectInfo{
+				Root: root,
+				Pkg:  pkg,
+				Name: name,
+			},
+		}
+		if err := packer.Pack(); err != nil {
 			return fmt.Errorf("bundling: %w", err)
 		}
 		return nil
