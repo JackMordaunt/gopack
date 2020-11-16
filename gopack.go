@@ -106,7 +106,7 @@ func (p Packer) Pack() error {
 		return fmt.Errorf("no artifacts to pack")
 	}
 	if p.MetaData.Icon == "" {
-		fmt.Printf("warning: icon not found (icon.png)")
+		fmt.Printf("warning: icon not found (icon.png)\n")
 	}
 	// TODO: parallelize builds.
 	for _, artifact := range p.Artifacts {
@@ -118,8 +118,9 @@ func (p Packer) Pack() error {
 				artifact.Binary,
 				p.MetaData.Darwin.ICNS,
 				p.MetaData.Darwin.Plist,
+				p.Info.Name,
 			); err != nil {
-				return fmt.Errorf("bundling macos: %w", err)
+				fmt.Printf("bundling macos: %s\n", err)
 			}
 		case Windows:
 			if err := bundleWindows(
@@ -128,7 +129,7 @@ func (p Packer) Pack() error {
 				p.MetaData.Windows.ICO,
 				p.MetaData.Windows.Manifest,
 			); err != nil {
-				return fmt.Errorf("bundling windows: %w", err)
+				fmt.Printf("bundling windows: %s\n", err)
 			}
 		case Linux:
 			// if err := bundleLinux(
@@ -158,6 +159,11 @@ func (p *Packer) Compile() error {
 			return fmt.Errorf("resolving current working directory: %w", err)
 		}
 	}
+	if r, err := filepath.Abs(root); err != nil {
+		return fmt.Errorf("resolving root: %w", err)
+	} else {
+		root = r
+	}
 	if pkg != "" {
 		pkg, err = Finder{Root: root, IsDir: true}.Find(pkg)
 		if err != nil {
@@ -184,8 +190,9 @@ func (p *Packer) Compile() error {
 		cmd.Dir = root
 		cmd.Env = append(cmd.Env, fmt.Sprintf("GOOS=%s", target))
 		cmd.Env = append(cmd.Env, "GOARCH=amd64")
+		cmd.Env = append(cmd.Env, os.Environ()...)
 		if out, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("compiling %q for %q: %w: %s", pkg, target, err, string(out))
+			return fmt.Errorf("%q for %q: %w: %s", pkg, target, err, string(out))
 		}
 		p.Artifacts = append(p.Artifacts, Artifact{
 			Binary:   bin,
@@ -198,6 +205,9 @@ func (p *Packer) Compile() error {
 // Output returns the output directory to place artifacts into.
 func (p Packer) Output() string {
 	if p.Info != nil {
+		if p.Info.Dist == "" {
+			p.Info.Dist = "dist"
+		}
 		return filepath.Join(p.Info.Root, p.Info.Dist)
 	}
 	return "dist"
@@ -211,16 +221,18 @@ func (md *MetaData) Load(root string) error {
 		if err != nil {
 			return fmt.Errorf("icon: %w", err)
 		}
-		md.Icon = icon
+		if icon != "" {
+			md.Icon = icon
+		}
 	}
-	if md.Darwin.ICNS == "" {
+	if md.Darwin.ICNS == "" && md.Icon != "" {
 		icns := filepath.Join(os.TempDir(), "gopack", "icon.icns")
 		if err := convertIcon(md.Icon, icns); err != nil {
 			return fmt.Errorf("converting icon to .icns: %w", err)
 		}
 		md.Darwin.ICNS = icns
 	}
-	if md.Windows.ICO == "" {
+	if md.Windows.ICO == "" && md.Icon != "" {
 		ico := filepath.Join(os.TempDir(), "gopack", "icon.ico")
 		if err := convertIcon(md.Icon, ico); err != nil {
 			return fmt.Errorf("converting icon to .ico: %w", err)
@@ -250,7 +262,7 @@ func (md *MetaData) Load(root string) error {
 // extension {.icns,ico}.
 func convertIcon(src, dst string) error {
 	switch filepath.Ext(dst) {
-	case "icns":
+	case ".icns":
 		if err := func() error {
 			srcf, err := os.Open(src)
 			if err != nil {
@@ -273,7 +285,7 @@ func convertIcon(src, dst string) error {
 		}(); err != nil {
 			return fmt.Errorf("converting to .icns: %w", err)
 		}
-	case "ico":
+	case ".ico":
 		if err := ico.FromPNG(src, dst); err != nil {
 			return fmt.Errorf("converting to .ico: %w", err)
 		}

@@ -35,7 +35,7 @@ func cp(src, dst string) error {
 	}
 	srcf, err := os.Open(src)
 	if err != nil {
-		return fmt.Errorf("opening %q: %w", src, err)
+		return fmt.Errorf("%w", err)
 	}
 	defer srcf.Close()
 	_, err = os.Stat(filepath.Dir(dst))
@@ -73,13 +73,16 @@ func (f Finder) Find(name string) (string, error) {
 		if err != nil {
 			return err
 		}
-		if info.IsDir() == f.IsDir {
-			found = filepath.Join(path, info.Name())
+		if info.IsDir() == f.IsDir && info.Name() == name {
+			found = path
 		}
 		return nil
 	})
 	if err != nil {
 		return "", fmt.Errorf("walking: %w", err)
+	}
+	if found == "" {
+		return "", nil
 	}
 	found, err = filepath.Abs(found)
 	if err != nil {
