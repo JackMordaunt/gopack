@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"git.sr.ht/~jackmordaunt/gopack/ico"
 	"github.com/jackmordaunt/icns"
@@ -108,38 +109,45 @@ func (p Packer) Pack() error {
 	if p.MetaData.Icon == "" {
 		fmt.Printf("warning: icon not found (icon.png)\n")
 	}
-	// TODO: parallelize builds.
+	wg := &sync.WaitGroup{}
 	for _, artifact := range p.Artifacts {
-		dir := filepath.Join(p.Output(), artifact.Platform.String())
-		switch artifact.Platform {
-		case Darwin:
-			if err := bundleMacOS(
-				dir,
-				artifact.Binary,
-				p.MetaData.Darwin.ICNS,
-				p.MetaData.Darwin.Plist,
-				p.Info.Name,
-			); err != nil {
-				fmt.Printf("bundling macos: %s\n", err)
+		var (
+			artifact = artifact
+			dir      = filepath.Join(p.Output(), artifact.Platform.String())
+		)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			switch artifact.Platform {
+			case Darwin:
+				if err := bundleMacOS(
+					dir,
+					artifact.Binary,
+					p.MetaData.Darwin.ICNS,
+					p.MetaData.Darwin.Plist,
+					p.Info.Name,
+				); err != nil {
+					fmt.Printf("bundling macos: %s\n", err)
+				}
+			case Windows:
+				if err := bundleWindows(
+					dir,
+					artifact.Binary,
+					p.MetaData.Windows.ICO,
+					p.MetaData.Windows.Manifest,
+				); err != nil {
+					fmt.Printf("bundling windows: %s\n", err)
+				}
+			case Linux:
+				// if err := bundleLinux(
+				// 	dir,
+				// 	artifact.Binary,
+				// 	icon,
+				// ); err != nil {
+				// 	return fmt.Errorf("bundling linux: %w", err)
+				// }
 			}
-		case Windows:
-			if err := bundleWindows(
-				dir,
-				artifact.Binary,
-				p.MetaData.Windows.ICO,
-				p.MetaData.Windows.Manifest,
-			); err != nil {
-				fmt.Printf("bundling windows: %s\n", err)
-			}
-		case Linux:
-			// if err := bundleLinux(
-			// 	dir,
-			// 	artifact.Binary,
-			// 	icon,
-			// ); err != nil {
-			// 	return fmt.Errorf("bundling linux: %w", err)
-			// }
-		}
+		}()
 	}
 	return nil
 }
