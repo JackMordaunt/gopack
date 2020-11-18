@@ -55,5 +55,8 @@ func bundleWindows(dest, binary, icon, manifest string) error {
 		},
 		ReaderAt: iconfile,
 	})
+
+	// Add icon data to PE .rsrc section: how?
+	// Write PE back out: how?
 	return nil
 }

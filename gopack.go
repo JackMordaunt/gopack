@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"git.sr.ht/~jackmordaunt/gopack/ico"
+	"git.sr.ht/~jackmordaunt/gopack/rsrc"
 	"github.com/jackmordaunt/icns"
 )
 
@@ -45,7 +46,7 @@ type ProjectInfo struct {
 }
 
 // MetaData contains paths to meta files such as icon and manifests.
-// TODO: Specify data in a common format (eg, yml).
+// Todo: Specify data in a common format (eg, yml).
 // Grab common data author, description, etc and allow for custom data.
 // Then, generate the platform specific files or skip that and directly embed
 // the meta data (eg windows manifest).
@@ -61,7 +62,7 @@ type MetaData struct {
 		Manifest string
 	}
 	Linux struct {
-		// TODO: flatpack, snap, appimage?
+		// Todo: flatpack, snap, appimage?
 	}
 }
 
@@ -95,20 +96,20 @@ func (p Platform) String() string {
 // Pack the binaries into native formats.
 func (p Packer) Pack() error {
 	if p.Info != nil {
-		if err := p.Compile(); err != nil {
-			return fmt.Errorf("compiling: %w", err)
-		}
 		if err := p.MetaData.Load(p.Info.Root); err != nil {
 			return fmt.Errorf("loading metadata: %w", err)
+		}
+		if p.MetaData.Icon == "" {
+			fmt.Printf("warning: icon not found (icon.png)")
+		}
+		if err := p.Compile(); err != nil {
+			return fmt.Errorf("compiling: %w", err)
 		}
 	}
 	if len(p.Artifacts) == 0 {
 		return fmt.Errorf("no artifacts to pack")
 	}
-	if p.MetaData.Icon == "" {
-		fmt.Printf("warning: icon not found (icon.png)")
-	}
-	// TODO: parallelize builds.
+	// Todo: parallelize builds.
 	for _, artifact := range p.Artifacts {
 		dir := filepath.Join(p.Output(), artifact.Platform.String())
 		switch artifact.Platform {
@@ -173,6 +174,12 @@ func (p *Packer) Compile() error {
 		bin := filepath.Join(output, target.String(), filepath.Base(pkg))
 		if target == Windows {
 			bin += ".exe"
+			if p.MetaData.Windows.ICO != "" {
+				if err := rsrc.Embed("icon.syso", rsrc.AMD64, p.MetaData.Windows.ICO); err != nil {
+					return fmt.Errorf("windows: creating icon resource: %w", err)
+				}
+			}
+			// defer os.Remove("icon.syso")
 		}
 		cmd := exec.Command(
 			"go", "build",
@@ -235,14 +242,14 @@ func (md *MetaData) Load(root string) error {
 		md.Darwin.Plist = plist
 	}
 	if md.Windows.Manifest == "" {
-		// TODO: pattern matching search?
+		// Todo: pattern matching search?
 		manifest, err := finder.Find("manifest")
 		if err != nil {
 			return fmt.Errorf("manifest: %w", err)
 		}
 		md.Windows.Manifest = manifest
 	}
-	// TODO: load linux meta data.
+	// Todo: load linux meta data.
 	return nil
 }
 
