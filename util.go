@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // cp copies src file to destination.
@@ -50,6 +51,8 @@ func cp(src, dst string) error {
 type Finder struct {
 	Root  string
 	IsDir bool
+	// Rel indicates to return a relative path instead of an absolute path.
+	Rel bool
 }
 
 // Find the first file with the given name recursively from the root.
@@ -65,6 +68,9 @@ func (f Finder) Find(name string) (string, error) {
 			return err
 		}
 		if info.IsDir() == f.IsDir && info.Name() == name {
+			if f.Rel {
+				path = filepath.Clean(strings.TrimPrefix(path, f.Root))
+			}
 			found = path
 		}
 		return nil
@@ -75,9 +81,11 @@ func (f Finder) Find(name string) (string, error) {
 	if found == "" {
 		return "", nil
 	}
-	found, err = filepath.Abs(found)
-	if err != nil {
-		return "", fmt.Errorf("resolving absolute path: %w", err)
+	if !f.Rel {
+		found, err = filepath.Abs(found)
+		if err != nil {
+			return "", fmt.Errorf("resolving absolute path: %w", err)
+		}
 	}
 	return found, nil
 }
