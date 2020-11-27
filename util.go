@@ -4,17 +4,8 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 )
-
-// run the specified command and return any error.
-func run(cmd string, args ...string) error {
-	if out, err := exec.Command(cmd, args...).CombinedOutput(); err != nil {
-		return fmt.Errorf("running command %q: %v: %w", cmd, string(out), err)
-	}
-	return nil
-}
 
 // cp copies src file to destination.
 // If destination is a directory, the file will be copied into it.
