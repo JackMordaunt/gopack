@@ -38,7 +38,7 @@ func bundleMacOS(dest, binary, icon, plist, name string) error {
 	if err := cp(binary, filepath.Join(macos, filepath.Base(binary))); err != nil {
 		return fmt.Errorf("copying binary: %w", err)
 	}
-	// TODO generate Info.plist from metadata.
+	// #Todo generate Info.plist from metadata.
 	if err := cp(plist, filepath.Join(contents, "Info.plist")); err != nil {
 		return fmt.Errorf("copying plist: %w", err)
 	}
@@ -51,39 +51,39 @@ func bundleMacOS(dest, binary, icon, plist, name string) error {
 	return nil
 }
 
-// DmgMeta is the DMG metadata that appears at the end of the disk image.
-type DmgMeta struct {
-	Signature             [4]byte // magic 'koly'
-	Version               uint32  // 4 (as of 2013)
-	HeaderSize            uint32  // sizeof(this) =  512 (as of 2013)
-	Flags                 uint32
-	RunningDataForkOffset uint64
-	DataForkOffset        uint64 // usually 0, beginning of file
-	DataForkLength        uint64
-	RsrcForkOffset        uint64 // resource fork offset and length
-	RsrcForkLength        uint64
-	SegmentNumber         uint32 // Usually 1, can be 0
-	SegmentCount          uint32 // Usually 1, can be 0
-	SegmentID             [128]byte
-	DataChecksumType      uint32 // Data fork checksum
-	DataChecksumSize      uint32
-	DataChecksum          [32]uint32
-	XMLOffset             uint64 // Position of XML property list in file
-	XMLLength             uint64
-	Reserved1             [120]byte
-	ChecksumType          uint32 // Master checksum
-	ChecksumSize          uint32
-	Checksum              [32]uint32
-	ImageVariant          uint32 // Unknown, commonly 1
-	SectorCount           uint64
-	reserved2             uint32
-	reserved3             uint32
-	reserved4             uint32
-}
+// // DmgMeta is the DMG metadata that appears at the end of the disk image.
+// type DmgMeta struct {
+// 	Signature             [4]byte // magic 'koly'
+// 	Version               uint32  // 4 (as of 2013)
+// 	HeaderSize            uint32  // sizeof(this) =  512 (as of 2013)
+// 	Flags                 uint32
+// 	RunningDataForkOffset uint64
+// 	DataForkOffset        uint64 // usually 0, beginning of file
+// 	DataForkLength        uint64
+// 	RsrcForkOffset        uint64 // resource fork offset and length
+// 	RsrcForkLength        uint64
+// 	SegmentNumber         uint32 // Usually 1, can be 0
+// 	SegmentCount          uint32 // Usually 1, can be 0
+// 	SegmentID             [128]byte
+// 	DataChecksumType      uint32 // Data fork checksum
+// 	DataChecksumSize      uint32
+// 	DataChecksum          [32]uint32
+// 	XMLOffset             uint64 // Position of XML property list in file
+// 	XMLLength             uint64
+// 	Reserved1             [120]byte
+// 	ChecksumType          uint32 // Master checksum
+// 	ChecksumSize          uint32
+// 	Checksum              [32]uint32
+// 	ImageVariant          uint32 // Unknown, commonly 1
+// 	SectorCount           uint64
+// 	reserved2             uint32
+// 	reserved3             uint32
+// 	reserved4             uint32
+// }
 
-func (md DmgMeta) Bytes() []byte {
-	return nil
-}
+// func (md DmgMeta) Bytes() []byte {
+// 	return nil
+// }
 
 // dmg creates an iso disk image of src and places it into dst.
 //
@@ -103,7 +103,7 @@ func dmg(src, dst, id string) error {
 	if err != nil {
 		return fmt.Errorf("initialising writer: %w", err)
 	}
-	defer writer.Cleanup()
+	defer func() { _ = writer.Cleanup() }()
 	if err := filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -129,9 +129,9 @@ func dmg(src, dst, id string) error {
 	if err != nil {
 		return fmt.Errorf("writing ISO image: %w", err)
 	}
-	if _, err := b.Write(DmgMeta{}.Bytes()); err != nil {
-		return fmt.Errorf("writing dmg metadata")
-	}
+	// if _, err := b.Write(DmgMeta{}.Bytes()); err != nil {
+	// 	return fmt.Errorf("writing dmg metadata")
+	// }
 	outputFile, err := os.OpenFile(
 		filepath.Join(dst, id+".dmg"),
 		os.O_WRONLY|os.O_TRUNC|os.O_CREATE,
