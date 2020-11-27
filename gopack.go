@@ -10,7 +10,7 @@ import (
 	"sync"
 
 	"git.sr.ht/~jackmordaunt/gopack/ico"
-	"git.sr.ht/~jackmordaunt/gopack/rsrc"
+	"github.com/akavel/rsrc/rsrc"
 	"github.com/jackmordaunt/icns"
 )
 
@@ -47,10 +47,12 @@ type ProjectInfo struct {
 }
 
 // MetaData contains paths to meta files such as icon and manifests.
-// Todo: Specify data in a common format (eg, yml).
+//
+// TODO Specify data in a common format (eg, yml).
 // Grab common data author, description, etc and allow for custom data.
 // Then, generate the platform specific files or skip that and directly embed
 // the meta data (eg windows manifest).
+//
 type MetaData struct {
 	Icon   string
 	Darwin struct {
@@ -63,23 +65,70 @@ type MetaData struct {
 		Manifest string
 	}
 	Linux struct {
-		// Todo: flatpack, snap, appimage?
+		// TODO flatpack, snap, appimage?
 	}
 }
 
 // Artifact associates a path to a binary with the platform it's intended for.
 type Artifact struct {
-	Binary   string
-	Platform Platform
+	Binary string
+	Target
+}
+
+type Target struct {
+	Platform     Platform
+	Architecture Architecture
+}
+
+// Targets is a static list of supported targets as a subset of output by
+// `go tool dist list`.
+var Targets = []Target{
+	NewTarget("windows/386"),
+	NewTarget("windows/amd64"),
+	NewTarget("windows/arm"),
+	NewTarget("darwin/amd64"),
+	// NewTarget("darwin/arm64"),
+	NewTarget("linux/386"),
+	NewTarget("linux/amd64"),
+	NewTarget("linux/arm"),
+	NewTarget("linux/arm64"),
+	NewTarget("js/wasm"),
+}
+
+func NewTarget(s string) Target {
+	var (
+		p Platform
+		a Architecture
+	)
+	return Target{
+		Platform:     p.FromStr(strings.Split(s, "/")[0]),
+		Architecture: a.FromStr(strings.Split(s, "/")[1]),
+	}
+}
+
+func (t Target) Ext() string {
+	switch t.Platform {
+	case Windows:
+		return ".exe"
+	case JS:
+		return ".wasm"
+	}
+	return ""
+}
+
+func (t Target) String() string {
+	return fmt.Sprintf("%s_%s", t.Platform, t.Architecture)
 }
 
 // Platform identifier for the platforms we care about.
 type Platform uint8
 
+// Platforms supported.
 const (
 	Windows Platform = iota
 	Darwin
 	Linux
+	JS
 )
 
 func (p Platform) String() string {
@@ -90,8 +139,76 @@ func (p Platform) String() string {
 		return "darwin"
 	case Linux:
 		return "linux"
+	case JS:
+		return "js"
 	}
-	return ""
+	return "unknown"
+}
+
+func (p *Platform) FromStr(s string) Platform {
+	switch s {
+	case "windows":
+		*p = Windows
+	case "darwin":
+		*p = Darwin
+	case "linux":
+		*p = Linux
+	case "js":
+		*p = JS
+	}
+	return *p
+}
+
+func (p Platform) List() []Platform {
+	return []Platform{Windows, Darwin, Linux}
+}
+
+// Architecture of the machine.
+type Architecture uint8
+
+// Architectures supported.
+const (
+	X86 Architecture = iota
+	AMD64
+	ARM
+	ARM64
+	WASM
+)
+
+func (a Architecture) String() string {
+	switch a {
+	case X86:
+		return "386"
+	case AMD64:
+		return "amd64"
+	case ARM:
+		return "arm"
+	case ARM64:
+		return "arm64"
+	case WASM:
+		return "wasm"
+	}
+	return "unknown"
+}
+
+func (a *Architecture) FromStr(s string) Architecture {
+	switch s {
+	case "386":
+		*a = X86
+	case "amd64":
+		*a = AMD64
+	case "arm":
+		*a = ARM
+	case "arm64":
+		*a = ARM64
+	case "wasm":
+		*a = WASM
+	}
+	return *a
+}
+
+func (a Architecture) List() []Architecture {
+	return []Architecture{X86, AMD64, ARM, ARM64}
 }
 
 // Pack the binaries into native formats.
@@ -117,7 +234,7 @@ func (p Packer) Pack() error {
 	for _, artifact := range p.Artifacts {
 		var (
 			artifact = artifact
-			dir      = filepath.Join(p.Output(), artifact.Platform.String())
+			dir      = filepath.Join(p.Output(), artifact.Target.String())
 		)
 		wg.Add(1)
 		go func() {
@@ -143,21 +260,23 @@ func (p Packer) Pack() error {
 					fmt.Printf("bundling windows: %s\n", err)
 				}
 			case Linux:
-				// if err := bundleLinux(
-				// 	dir,
-				// 	artifact.Binary,
-				// 	icon,
-				// ); err != nil {
-				// 	return fmt.Errorf("bundling linux: %w", err)
-				// }
+				if err := bundleLinux(
+					dir,
+					artifact.Binary,
+					"",
+				); err != nil {
+					fmt.Printf("bundling linux: %s\n", err)
+				}
 			}
 		}()
 	}
+	wg.Wait()
 	return nil
 }
 
 // Compile the Go project.
 // Requires Go toolchain to be installed.
+// Compiles targets in parallel.
 func (p *Packer) Compile() error {
 	var (
 		root   = p.Info.Root
@@ -182,40 +301,77 @@ func (p *Packer) Compile() error {
 			return fmt.Errorf("finding package: %w", err)
 		}
 		if pkg == "" {
-			return fmt.Errorf("package %q not found", pkg)
+			return fmt.Errorf("package %q not found", p.Info.Pkg)
 		}
 	} else {
 		pkg = root
 	}
-	for _, target := range []Platform{Windows, Darwin, Linux} {
-		bin := filepath.Join(output, target.String(), filepath.Base(pkg))
-		if target == Windows {
-			bin += ".exe"
-			if p.MetaData.Windows.ICO != "" {
-				if err := rsrc.Embed("icon.syso", rsrc.AMD64, p.MetaData.Windows.ICO); err != nil {
-					return fmt.Errorf("windows: creating icon resource: %w", err)
+	wg := &sync.WaitGroup{}
+	errs := make(chan error, len(Targets))
+	for _, target := range Targets {
+		target := target
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := func() error {
+				var (
+					platform = target.Platform
+					arch     = target.Architecture
+					sandbox  = filepath.Join(os.TempDir(), "gopack", target.String())
+					bin      = fmt.Sprintf(
+						"%s%s",
+						filepath.Join(
+							output,
+							fmt.Sprintf("%s_%s", platform.String(), arch.String()),
+							filepath.Base(pkg)),
+						target.Ext())
+				)
+
+				// ENHANCE can we make this more semantic?
+				if err := (Copier{Recursive: true, Ignore: []string{"dist"}}).Copy(root, sandbox); err != nil {
+					return fmt.Errorf("creating sandbox: %w", err)
 				}
+
+				// TODO reify "precompile" step to capture this edge cases.
+				// ENHANCE editing PE binary data inline, without creating a .syso file would be
+				// more robust.
+				if platform == Windows {
+					if p.MetaData.Windows.ICO != "" {
+						if err := rsrc.Embed("rsrc.syso", "amd64", "", p.MetaData.Windows.ICO); err != nil {
+							return fmt.Errorf("windows: creating icon resource: %w", err)
+						}
+					}
+					defer os.Remove("rsrc.syso")
+				}
+				// TODO target-specific linker and compiler flags.
+				cmd := exec.Command(
+					"go", "build",
+					"-ldflags", strings.Join(p.Info.Flags.Linker, " "),
+					"-gcflags", strings.Join(p.Info.Flags.Compiler, " "),
+					"-o", bin,
+					pkg,
+				)
+				cmd.Dir = sandbox
+				cmd.Env = append(cmd.Env, fmt.Sprintf("GOOS=%s", platform))
+				cmd.Env = append(cmd.Env, fmt.Sprintf("GOARCH=%s", arch))
+				cmd.Env = append(cmd.Env, os.Environ()...)
+				if out, err := cmd.CombinedOutput(); err != nil {
+					return fmt.Errorf("%q for %q: %w: %s", pkg, platform, err, string(out))
+				}
+				p.Artifacts = append(p.Artifacts, Artifact{
+					Binary: bin,
+					Target: target,
+				})
+				return nil
+			}(); err != nil {
+				errs <- fmt.Errorf("%s: %w", target.String(), err)
 			}
-			// defer os.Remove("icon.syso")
-		}
-		cmd := exec.Command(
-			"go", "build",
-			"-ldflags", strings.Join(p.Info.Flags.Linker, " "),
-			"-gcflags", strings.Join(p.Info.Flags.Compiler, " "),
-			"-o", bin,
-			pkg,
-		)
-		cmd.Dir = root
-		cmd.Env = append(cmd.Env, fmt.Sprintf("GOOS=%s", target))
-		cmd.Env = append(cmd.Env, "GOARCH=amd64")
-		cmd.Env = append(cmd.Env, os.Environ()...)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("%q for %q: %w: %s", pkg, target, err, string(out))
-		}
-		p.Artifacts = append(p.Artifacts, Artifact{
-			Binary:   bin,
-			Platform: target,
-		})
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	if err := new(MultiError).FromChan(errs); !err.IsEmpty() {
+		return err
 	}
 	return nil
 }
@@ -246,14 +402,14 @@ func (md *MetaData) Load(root string) error {
 	if md.Darwin.ICNS == "" && md.Icon != "" {
 		icns := filepath.Join(os.TempDir(), "gopack", "icon.icns")
 		if err := convertIcon(md.Icon, icns); err != nil {
-			return fmt.Errorf("converting icon to .icns: %w", err)
+			return err
 		}
 		md.Darwin.ICNS = icns
 	}
 	if md.Windows.ICO == "" && md.Icon != "" {
 		ico := filepath.Join(os.TempDir(), "gopack", "icon.ico")
 		if err := convertIcon(md.Icon, ico); err != nil {
-			return fmt.Errorf("converting icon to .ico: %w", err)
+			return err
 		}
 		md.Windows.ICO = ico
 	}
@@ -265,14 +421,14 @@ func (md *MetaData) Load(root string) error {
 		md.Darwin.Plist = plist
 	}
 	if md.Windows.Manifest == "" {
-		// Todo: pattern matching search?
+		// TODO pattern matching search?
 		manifest, err := finder.Find("manifest")
 		if err != nil {
 			return fmt.Errorf("manifest: %w", err)
 		}
 		md.Windows.Manifest = manifest
 	}
-	// Todo: load linux meta data.
+	// TODO load linux meta data.
 	return nil
 }
 
@@ -291,6 +447,7 @@ func convertIcon(src, dst string) error {
 			if err != nil {
 				return fmt.Errorf("decoding source png: %w", err)
 			}
+			_ = os.MkdirAll(filepath.Dir(dst), 0777)
 			dstf, err := os.OpenFile(dst, os.O_CREATE|os.O_RDWR, 0644)
 			if err != nil {
 				return fmt.Errorf("opening destination file: %w", err)
@@ -310,5 +467,41 @@ func convertIcon(src, dst string) error {
 	default:
 		return fmt.Errorf("cannot handle %q", filepath.Ext(dst))
 	}
+	return nil
+}
+
+// MultiError combines a number of errors into a single error value.
+type MultiError []error
+
+func (me *MultiError) FromChan(errs chan error) *MultiError {
+	for err := range errs {
+		(*me) = append((*me), err)
+	}
+	return me
+}
+
+func (me MultiError) IsEmpty() bool {
+	return len(me) == 0
+}
+
+func (me MultiError) Error() string {
+	if len(me) == 1 {
+		return me[0].Error()
+	}
+	var b strings.Builder
+	b.WriteString("[\n")
+	for ii, err := range me {
+		fmt.Fprintf(&b, "\t%d: %s\n", ii+1, err)
+	}
+	b.WriteString("]\n")
+	return b.String()
+}
+
+type Copier struct {
+	Recursive bool
+	Ignore    []string
+}
+
+func (c Copier) Copy(from, to string) error {
 	return nil
 }
