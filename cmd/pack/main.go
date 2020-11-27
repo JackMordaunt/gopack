@@ -10,7 +10,7 @@ import (
 )
 
 func main() {
-	// Todo:
+	// TODO
 	// - Accept dir to binaries, parse binary formats to figure what platform
 	// they are intended for.
 	// - Allow for zero config execution.
