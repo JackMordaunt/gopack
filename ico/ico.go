@@ -27,7 +27,7 @@ type Header struct {
 type Descriptor struct {
 	width  uint8
 	height uint8
-	colors uint8
+	_      uint8 // colors
 	_      uint8
 	planes uint16
 	bpp    uint16
