@@ -3,6 +3,7 @@ package gopack
 import (
 	"fmt"
 	"image/png"
+	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -221,14 +222,11 @@ func (p Packer) Pack() error {
 			fmt.Printf("warning: icon not found (icon.png)")
 		}
 		if err := p.Compile(); err != nil {
-			return fmt.Errorf("compiling: %w", err)
+			return fmt.Errorf("compiling %q: %w", p.Info.Pkg, err)
 		}
 	}
 	if len(p.Artifacts) == 0 {
 		return fmt.Errorf("no artifacts to pack")
-	}
-	if p.MetaData.Icon == "" {
-		fmt.Printf("warning: icon not found (icon.png)\n")
 	}
 	wg := &sync.WaitGroup{}
 	for _, artifact := range p.Artifacts {
@@ -254,8 +252,6 @@ func (p Packer) Pack() error {
 				if err := bundleWindows(
 					dir,
 					artifact.Binary,
-					p.MetaData.Windows.ICO,
-					p.MetaData.Windows.Manifest,
 				); err != nil {
 					fmt.Printf("bundling windows: %s\n", err)
 				}
@@ -279,32 +275,30 @@ func (p Packer) Pack() error {
 // Compiles targets in parallel.
 func (p *Packer) Compile() error {
 	var (
-		root   = p.Info.Root
-		pkg    = p.Info.Pkg
 		output = p.Output()
 		err    error
 	)
-	if root == "" {
-		root, err = os.Getwd()
+	if p.Info.Root == "" {
+		p.Info.Root, err = os.Getwd()
 		if err != nil {
 			return fmt.Errorf("resolving current working directory: %w", err)
 		}
 	}
-	if r, err := filepath.Abs(root); err != nil {
+	if r, err := filepath.Abs(p.Info.Root); err != nil {
 		return fmt.Errorf("resolving root: %w", err)
 	} else {
-		root = r
+		p.Info.Root = r
 	}
-	if pkg != "" {
-		pkg, err = Finder{Root: root, IsDir: true}.Find(pkg)
+	if p.Info.Pkg != "" {
+		p.Info.Pkg, err = Finder{Root: p.Info.Root, IsDir: true, Rel: true}.Find(p.Info.Pkg)
 		if err != nil {
 			return fmt.Errorf("finding package: %w", err)
 		}
-		if pkg == "" {
+		if p.Info.Pkg == "" {
 			return fmt.Errorf("package %q not found", p.Info.Pkg)
 		}
 	} else {
-		pkg = root
+		p.Info.Pkg = p.Info.Root
 	}
 	wg := &sync.WaitGroup{}
 	errs := make(chan error, len(Targets))
@@ -321,42 +315,48 @@ func (p *Packer) Compile() error {
 					bin      = fmt.Sprintf(
 						"%s%s",
 						filepath.Join(
+							sandbox,
 							output,
 							fmt.Sprintf("%s_%s", platform.String(), arch.String()),
-							filepath.Base(pkg)),
+							filepath.Base(p.Info.Pkg)),
 						target.Ext())
 				)
-
-				// ENHANCE can we make this more semantic?
-				if err := (Copier{Recursive: true, Ignore: []string{"dist"}}).Copy(root, sandbox); err != nil {
+				// ENHANCE can we make this more semantic? EG: "prepare sandbox".
+				if err := (Copier{
+					Recursive: true,
+					Ignore:    []string{"dist", ".git"},
+				}).Copy(p.Info.Root, sandbox); err != nil {
 					return fmt.Errorf("creating sandbox: %w", err)
 				}
-
 				// TODO reify "precompile" step to capture this edge cases.
 				// ENHANCE editing PE binary data inline, without creating a .syso file would be
 				// more robust.
-				if platform == Windows {
-					if p.MetaData.Windows.ICO != "" {
-						if err := rsrc.Embed("rsrc.syso", "amd64", "", p.MetaData.Windows.ICO); err != nil {
-							return fmt.Errorf("windows: creating icon resource: %w", err)
-						}
+				if platform == Windows && p.MetaData.Windows.ICO != "" {
+					resource := filepath.Join(sandbox, "rsrc.syso")
+					if err := rsrc.Embed(resource, arch.String(), "", p.MetaData.Windows.ICO); err != nil {
+						return fmt.Errorf("windows: creating icon resource: %w", err)
 					}
-					defer os.Remove("rsrc.syso")
+					defer os.Remove(resource)
 				}
 				// TODO target-specific linker and compiler flags.
 				cmd := exec.Command(
 					"go", "build",
+					"-o", bin,
 					"-ldflags", strings.Join(p.Info.Flags.Linker, " "),
 					"-gcflags", strings.Join(p.Info.Flags.Compiler, " "),
-					"-o", bin,
-					pkg,
+					p.Info.Pkg,
 				)
 				cmd.Dir = sandbox
 				cmd.Env = append(cmd.Env, fmt.Sprintf("GOOS=%s", platform))
 				cmd.Env = append(cmd.Env, fmt.Sprintf("GOARCH=%s", arch))
 				cmd.Env = append(cmd.Env, os.Environ()...)
 				if out, err := cmd.CombinedOutput(); err != nil {
-					return fmt.Errorf("%q for %q: %w: %s", pkg, platform, err, string(out))
+					return fmt.Errorf("%s%w", func() string {
+						if len(out) == 0 {
+							return ""
+						}
+						return fmt.Sprintf("%s: ", strings.TrimSpace(string(out)))
+					}(), err)
 				}
 				p.Artifacts = append(p.Artifacts, Artifact{
 					Binary: bin,
@@ -497,11 +497,60 @@ func (me MultiError) Error() string {
 	return b.String()
 }
 
+// Copier copies files from one path to another.
+// Not recursive by default.
+// Optional list of patterns to ignore via `strings.Contains`.
 type Copier struct {
 	Recursive bool
 	Ignore    []string
 }
 
+// Copy files `from` into `to`.
 func (c Copier) Copy(from, to string) error {
+	if !c.Recursive {
+		entries, err := ioutil.ReadDir(from)
+		if err != nil {
+			return fmt.Errorf("reading dir: %w", err)
+		}
+		for _, entry := range entries {
+			from = filepath.Join(from, entry.Name())
+			to = filepath.Join(to, entry.Name())
+			if !entry.IsDir() && !c.ignore(from) {
+				if err := cp(from, to); err != nil {
+					return fmt.Errorf("copying file: %w", err)
+				}
+			}
+		}
+		return nil
+	}
+	if err := filepath.Walk(from, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if c.ignore(path) {
+			return nil
+		}
+		target := filepath.Join(to, strings.TrimPrefix(path, from))
+		if info.IsDir() {
+			_ = os.MkdirAll(target, 0777)
+		} else {
+			if err := cp(path, target); err != nil {
+				return fmt.Errorf("copying file: %w", err)
+			}
+		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("copying files: %w", err)
+	}
 	return nil
+}
+
+// ignore path if it contains any of the ignore patterns.
+func (c Copier) ignore(path string) bool {
+	for _, pattern := range c.Ignore {
+		if strings.Contains(path, pattern) {
+			return true
+		}
+	}
+	return false
 }
