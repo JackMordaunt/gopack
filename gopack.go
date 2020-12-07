@@ -45,6 +45,8 @@ type ProjectInfo struct {
 		// go tool link
 		Linker []string
 	}
+	// Targets lists all targets to compile for.
+	Targets []Target
 }
 
 // MetaData contains paths to meta files such as icon and manifests.
@@ -81,9 +83,9 @@ type Target struct {
 	Architecture Architecture
 }
 
-// Targets is a static list of supported targets as a subset of output by
+// DefaultTargets is a static list of supported targets as a subset of output by
 // `go tool dist list`.
-var Targets = []Target{
+var DefaultTargets = []Target{
 	NewTarget("windows/386"),
 	NewTarget("windows/amd64"),
 	NewTarget("windows/arm"),
@@ -303,8 +305,8 @@ func (p *Packer) Compile() error {
 	fmt.Printf("package: %s\n", p.Info.Pkg)
 	fmt.Printf("sandbox: %s\n", os.TempDir())
 	wg := &sync.WaitGroup{}
-	errs := make(chan error, len(Targets))
-	for _, target := range Targets {
+	errs := make(chan error, len(p.Info.Targets))
+	for _, target := range p.Info.Targets {
 		target := target
 		wg.Add(1)
 		go func() {
