@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image/png"
 	"io/ioutil"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -37,16 +38,31 @@ type ProjectInfo struct {
 	// Defaults to "dist".
 	Dist string
 	// Flags are values to pass to the compiler.
-	Flags struct {
-		// Compiler flags.
-		// go tool compile
-		Compiler []string
-		// Linker flags.
-		// go tool link
-		Linker []string
-	}
+	Flags Flags
 	// Targets lists all targets to compile for.
 	Targets []Target
+}
+
+// Flags maps tooling flags to Targets.
+type Flags map[Target]FlagSet
+
+// Lookup the flags for a Target, returning an zero value if not FlagSet
+// specified.
+func (f Flags) Lookup(target Target) FlagSet {
+	if t, ok := f[target]; ok {
+		return t
+	}
+	return FlagSet{}
+}
+
+// Flags contains tooling flags.
+type FlagSet struct {
+	// Compiler flags.
+	// go tool compile
+	Compiler []string
+	// Linker flags.
+	// go tool link
+	Linker []string
 }
 
 // MetaData contains paths to meta files such as icon and manifests.
@@ -325,6 +341,12 @@ func (p *Packer) Compile() error {
 							filepath.Base(p.Info.Pkg)),
 						target.Ext())
 				)
+				if err := os.RemoveAll(sandbox); err != nil {
+					log.Printf("cleaning sandbox: %v", err)
+				}
+				if err := os.MkdirAll(sandbox, 0777); err != nil {
+					log.Printf("preparing sandbox: %v", err)
+				}
 				// ENHANCE can we make this more semantic? EG: "prepare sandbox".
 				if err := (Copier{
 					Recursive: true,
@@ -346,14 +368,15 @@ func (p *Packer) Compile() error {
 				cmd := exec.Command(
 					"go", "build",
 					"-o", bin,
-					"-ldflags", strings.Join(p.Info.Flags.Linker, " "),
-					"-gcflags", strings.Join(p.Info.Flags.Compiler, " "),
+					"-ldflags", strings.Join(p.Info.Flags.Lookup(target).Linker, " "),
+					"-gcflags", strings.Join(p.Info.Flags.Lookup(target).Compiler, " "),
 					p.Info.Pkg,
 				)
 				cmd.Dir = sandbox
 				cmd.Env = append(cmd.Env, fmt.Sprintf("GOOS=%s", platform))
 				cmd.Env = append(cmd.Env, fmt.Sprintf("GOARCH=%s", arch))
 				cmd.Env = append(cmd.Env, os.Environ()...)
+				fmt.Printf("%s\n", cmd)
 				if out, err := cmd.CombinedOutput(); err != nil {
 					return fmt.Errorf("%s%w", func() string {
 						if len(out) == 0 {

@@ -50,6 +50,14 @@ func main() {
 				Pkg:     pkg,
 				Name:    name,
 				Targets: targets,
+				Flags: map[gopack.Target]gopack.FlagSet{
+					gopack.NewTarget("windows/amd64"): {
+						Linker: []string{"-H windowsgui"},
+					},
+					gopack.NewTarget("windows/386"): {
+						Linker: []string{"-H windowsgui"},
+					},
+				},
 			},
 		}
 		if err := packer.Pack(); err != nil {
