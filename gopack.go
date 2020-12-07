@@ -222,7 +222,7 @@ func (p Packer) Pack() error {
 			fmt.Printf("warning: icon not found (icon.png)\n")
 		}
 		if err := p.Compile(); err != nil {
-			return fmt.Errorf("compiling %q: %w", p.Info.Pkg, err)
+			return fmt.Errorf("compiling %s: %w", p.Info.Pkg, err)
 		}
 	}
 	if len(p.Artifacts) == 0 {
@@ -300,8 +300,8 @@ func (p *Packer) Compile() error {
 	} else {
 		p.Info.Pkg = p.Info.Root
 	}
-	fmt.Printf("package: %q\n", p.Info.Pkg)
-	fmt.Printf("sandbox: %q\n", os.TempDir())
+	fmt.Printf("package: %s\n", p.Info.Pkg)
+	fmt.Printf("sandbox: %s\n", os.TempDir())
 	wg := &sync.WaitGroup{}
 	errs := make(chan error, len(Targets))
 	for _, target := range Targets {
