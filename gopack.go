@@ -219,7 +219,7 @@ func (p Packer) Pack() error {
 			return fmt.Errorf("loading metadata: %w", err)
 		}
 		if p.MetaData.Icon == "" {
-			fmt.Printf("warning: icon not found (icon.png)")
+			fmt.Printf("warning: icon not found (icon.png)\n")
 		}
 		if err := p.Compile(); err != nil {
 			return fmt.Errorf("compiling %q: %w", p.Info.Pkg, err)
@@ -300,6 +300,8 @@ func (p *Packer) Compile() error {
 	} else {
 		p.Info.Pkg = p.Info.Root
 	}
+	fmt.Printf("package: %q\n", p.Info.Pkg)
+	fmt.Printf("sandbox: %q\n", os.TempDir())
 	wg := &sync.WaitGroup{}
 	errs := make(chan error, len(Targets))
 	for _, target := range Targets {
