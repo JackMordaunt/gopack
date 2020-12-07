@@ -318,35 +318,38 @@ func (p *Packer) Compile() error {
 	} else {
 		p.Info.Pkg = p.Info.Root
 	}
+	var (
+		sandbox = filepath.Join(os.TempDir(), "gopack")
+		wg      = &sync.WaitGroup{}
+		errs    = make(chan error, len(p.Info.Targets))
+	)
 	fmt.Printf("package: %s\n", p.Info.Pkg)
-	fmt.Printf("sandbox: %s\n", os.TempDir())
-	wg := &sync.WaitGroup{}
-	errs := make(chan error, len(p.Info.Targets))
+	fmt.Printf("sandbox: %s\n", sandbox)
 	for _, target := range p.Info.Targets {
 		target := target
+		var (
+			platform = target.Platform
+			arch     = target.Architecture
+			sandbox  = filepath.Join(sandbox, target.String())
+			bin      = fmt.Sprintf(
+				"%s%s",
+				filepath.Join(
+					sandbox,
+					output,
+					fmt.Sprintf("%s_%s", platform.String(), arch.String()),
+					filepath.Base(p.Info.Pkg)),
+				target.Ext())
+		)
+		if err := os.RemoveAll(sandbox); err != nil {
+			log.Printf("cleaning sandbox: %v", err)
+		}
+		if err := os.MkdirAll(sandbox, 0777); err != nil {
+			log.Printf("preparing sandbox: %v", err)
+		}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			if err := func() error {
-				var (
-					platform = target.Platform
-					arch     = target.Architecture
-					sandbox  = filepath.Join(os.TempDir(), "gopack", target.String())
-					bin      = fmt.Sprintf(
-						"%s%s",
-						filepath.Join(
-							sandbox,
-							output,
-							fmt.Sprintf("%s_%s", platform.String(), arch.String()),
-							filepath.Base(p.Info.Pkg)),
-						target.Ext())
-				)
-				if err := os.RemoveAll(sandbox); err != nil {
-					log.Printf("cleaning sandbox: %v", err)
-				}
-				if err := os.MkdirAll(sandbox, 0777); err != nil {
-					log.Printf("preparing sandbox: %v", err)
-				}
 				// ENHANCE can we make this more semantic? EG: "prepare sandbox".
 				if err := (Copier{
 					Recursive: true,
