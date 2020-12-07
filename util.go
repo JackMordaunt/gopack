@@ -87,6 +87,10 @@ func (f Finder) Find(name string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("resolving absolute path: %w", err)
 		}
+	} else {
+		if found[0] != '.' {
+			found = "." + found
+		}
 	}
 	return found, nil
 }
