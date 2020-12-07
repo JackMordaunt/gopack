@@ -30,8 +30,7 @@ func cp(src, dst string) error {
 		return fmt.Errorf("%w", err)
 	}
 	defer srcf.Close()
-	_, err = os.Stat(filepath.Dir(dst))
-	if os.IsNotExist(err) {
+	if _, err = os.Stat(filepath.Dir(dst)); os.IsNotExist(err) {
 		if err := os.MkdirAll(filepath.Dir(dst), 0777); err != nil {
 			return fmt.Errorf("preparing %q: %w", filepath.Dir(dst), err)
 		}
@@ -49,7 +48,9 @@ func cp(src, dst string) error {
 
 // Finder finds files by name.
 type Finder struct {
-	Root  string
+	// Root folder to start search from.
+	Root string
+	// IsDir if we are looking for a directory.
 	IsDir bool
 	// Rel indicates to return a relative path instead of an absolute path.
 	Rel bool
