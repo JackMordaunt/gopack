@@ -1,50 +1,11 @@
-package gopack
+package util
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 )
-
-// cp copies src file to destination.
-// If destination is a directory, the file will be copied into it.
-// If destination doesn't exist it will be created as a file.
-// If destination is a file an error will be returned.
-func cp(src, dst string) error {
-	if src == "" || dst == "" {
-		return nil
-	}
-	var err error
-	src, err = filepath.Abs(src)
-	if err != nil {
-		return fmt.Errorf("resolving path: %w", err)
-	}
-	dst, err = filepath.Abs(dst)
-	if err != nil {
-		return fmt.Errorf("resolving path: %w", err)
-	}
-	srcf, err := os.Open(src)
-	if err != nil {
-		return fmt.Errorf("%w", err)
-	}
-	defer srcf.Close()
-	if _, err = os.Stat(filepath.Dir(dst)); os.IsNotExist(err) {
-		if err := os.MkdirAll(filepath.Dir(dst), 0777); err != nil {
-			return fmt.Errorf("preparing %q: %w", filepath.Dir(dst), err)
-		}
-	}
-	dstf, err := os.OpenFile(dst, os.O_CREATE|os.O_RDWR, 0777)
-	if err != nil {
-		return fmt.Errorf("creating %q: %w", dst, err)
-	}
-	defer dstf.Close()
-	if _, err := io.Copy(dstf, srcf); err != nil {
-		return fmt.Errorf("copying data: %w", err)
-	}
-	return nil
-}
 
 // Finder finds files by name.
 type Finder struct {

@@ -312,7 +312,11 @@ func (p *Packer) Compile() error {
 		p.Info.Root = r
 	}
 	if p.Info.Pkg != "" {
-		p.Info.Pkg, err = Finder{Root: p.Info.Root, IsDir: true, Rel: true}.Find(p.Info.Pkg)
+		p.Info.Pkg, err = util.Finder{
+			Root:  p.Info.Root,
+			IsDir: true,
+			Rel:   true,
+		}.Find(p.Info.Pkg)
 		if err != nil {
 			return fmt.Errorf("finding package: %w", err)
 		}
@@ -355,7 +359,7 @@ func (p *Packer) Compile() error {
 			defer wg.Done()
 			if err := func() error {
 				// ENHANCE can we make this more semantic? EG: "prepare sandbox".
-				if err := (Copier{
+				if err := (util.Copier{
 					Recursive: true,
 					Ignore:    []string{"dist", ".git"},
 				}).Copy(p.Info.Root, sandbox); err != nil {
@@ -421,7 +425,7 @@ func (p *Packer) Compile() error {
 	}
 	wg.Wait()
 	close(errs)
-	if err := new(MultiError).FromChan(errs); !err.IsEmpty() {
+	if err := new(util.MultiError).FromChan(errs); !err.IsEmpty() {
 		return err
 	}
 	return nil
@@ -441,7 +445,7 @@ func (p Packer) Output() string {
 // Load metadata using defaults if not specified.
 // For icons and other resources this means buffering the files in memory.
 func (md *MetaData) Load(root string) error {
-	finder := Finder{Root: root}
+	finder := util.Finder{Root: root}
 	if md.Icon == nil {
 		icon, err := finder.Find("icon.png")
 		if err != nil {
@@ -504,89 +508,4 @@ func (md *MetaData) Load(root string) error {
 	}
 	// TODO load linux meta data.
 	return nil
-}
-
-// MultiError combines a number of errors into a single error value.
-type MultiError []error
-
-func (me *MultiError) FromChan(errs chan error) *MultiError {
-	for err := range errs {
-		(*me) = append((*me), err)
-	}
-	return me
-}
-
-func (me MultiError) IsEmpty() bool {
-	return len(me) == 0
-}
-
-func (me MultiError) Error() string {
-	if len(me) == 1 {
-		return me[0].Error()
-	}
-	var b strings.Builder
-	b.WriteString("[\n")
-	for ii, err := range me {
-		fmt.Fprintf(&b, "\t%d: %s\n", ii+1, err)
-	}
-	b.WriteString("]\n")
-	return b.String()
-}
-
-// Copier copies files from one path to another.
-// Not recursive by default.
-// Optional list of patterns to ignore via `strings.Contains`.
-type Copier struct {
-	Recursive bool
-	Ignore    []string
-}
-
-// Copy files `from` into `to`.
-func (c Copier) Copy(from, to string) error {
-	if !c.Recursive {
-		entries, err := ioutil.ReadDir(from)
-		if err != nil {
-			return fmt.Errorf("reading dir: %w", err)
-		}
-		for _, entry := range entries {
-			from = filepath.Join(from, entry.Name())
-			to = filepath.Join(to, entry.Name())
-			if !entry.IsDir() && !c.ignore(from) {
-				if err := cp(from, to); err != nil {
-					return fmt.Errorf("copying file: %w", err)
-				}
-			}
-		}
-		return nil
-	}
-	if err := filepath.Walk(from, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if c.ignore(path) {
-			return nil
-		}
-		target := filepath.Join(to, strings.TrimPrefix(path, from))
-		if info.IsDir() {
-			_ = os.MkdirAll(target, 0777)
-		} else {
-			if err := cp(path, target); err != nil {
-				return fmt.Errorf("copying file: %w", err)
-			}
-		}
-		return nil
-	}); err != nil {
-		return fmt.Errorf("copying files: %w", err)
-	}
-	return nil
-}
-
-// ignore path if it contains any of the ignore patterns.
-func (c Copier) ignore(path string) bool {
-	for _, pattern := range c.Ignore {
-		if strings.Contains(path, pattern) {
-			return true
-		}
-	}
-	return false
 }
