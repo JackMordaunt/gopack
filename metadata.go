@@ -15,6 +15,17 @@ import (
 
 // MetaData pulls together all platform specific metadata require to create a
 // bundle.
+//
+// Note: we don't care about the structure of the platform files, hence they are
+// represented as blobs.
+//
+// @Todo Generate plist, manifest, et al from common data (author, version,
+// access requirements, etc).
+// This would allow streamlined use, as the user wouldn't need to individually
+// create such files; which is very much part of the mission statement of this
+// software.
+// If the user has already created those files for whatever reason, we can
+// fallback to copying them.
 type MetaData struct {
 	// Icon contains the image data for the icon.
 	Icon   image.Image
