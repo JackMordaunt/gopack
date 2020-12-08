@@ -12,9 +12,8 @@ import (
 )
 
 // bundleMacOS creates a macOS .app bundleMacOS on disk rooted at dest.
-// All paramaters are filepaths.
 // NB: Will clobber destination if it is a directory, or error if it is a file.
-func bundleMacOS(dest, binary, icon, plist, name string) error {
+func bundleMacOS(dest, name string, binary, icon, plist io.Reader) error {
 	var (
 		app       = filepath.Join(dest, fmt.Sprintf("%s.app", name))
 		contents  = filepath.Join(app, "Contents")
@@ -35,15 +34,26 @@ func bundleMacOS(dest, binary, icon, plist, name string) error {
 	if err := os.MkdirAll(resources, 0777); err != nil {
 		return fmt.Errorf("preparing directory: %w", err)
 	}
-	if err := cp(binary, filepath.Join(macos, filepath.Base(binary))); err != nil {
+	// cp copies the contents of a reader into a file at the specified path.
+	cp := func(dst string, src io.Reader) error {
+		dstf, err := os.Create(dst)
+		if err != nil {
+			return fmt.Errorf("creating file: %w", err)
+		}
+		defer dstf.Close()
+		if _, err := io.Copy(dstf, src); err != nil {
+			return err
+		}
+		return nil
+	}
+	if err := cp(filepath.Join(macos, name), binary); err != nil {
 		return fmt.Errorf("copying binary: %w", err)
 	}
-	// #Todo generate Info.plist from metadata.
-	if err := cp(plist, filepath.Join(contents, "Info.plist")); err != nil {
+	if err := cp(filepath.Join(contents, "Info.plist"), plist); err != nil {
 		return fmt.Errorf("copying plist: %w", err)
 	}
-	if err := cp(icon, filepath.Join(resources, filepath.Base(icon))); err != nil {
-		return fmt.Errorf("copying plist: %w", err)
+	if err := cp(filepath.Join(resources, fmt.Sprintf("%s.icns", name)), icon); err != nil {
+		return fmt.Errorf("copying icon: %w", err)
 	}
 	if err := dmg(app, filepath.Dir(app), name); err != nil {
 		return fmt.Errorf("creating disk image: %w", err)

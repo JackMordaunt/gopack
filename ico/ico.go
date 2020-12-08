@@ -3,12 +3,12 @@
 package ico
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"image"
 	"image/png"
-	"os"
+	"io"
 
 	"golang.org/x/image/draw"
 )
@@ -35,45 +35,30 @@ type Descriptor struct {
 	offset uint32
 }
 
-// FromPNG generates an ico from a source png.
-func FromPNG(pngfile string, iconfile string) error {
-	sizes := []int{256, 128, 64, 48, 32, 16}
-
-	pngf, err := os.Open(pngfile)
-	if err != nil {
-		return err
-	}
-	defer pngf.Close()
-
-	pngdata, err := png.Decode(pngf)
-	if err != nil {
-		return err
-	}
-
-	icons := []Container{}
-
+// FromPNG generates an ico from a source png and encodes it into an arbitrary
+// reader.
+func FromPNG(dst io.Writer, src image.Image) error {
+	var (
+		sizes = []int{256, 128, 64, 48, 32, 16}
+		icons = []Container{}
+	)
 	for _, size := range sizes {
-		rect := image.Rect(0, 0, int(size), int(size))
-		rawdata := image.NewRGBA(rect)
-		scale := draw.CatmullRom
-		scale.Scale(rawdata, rect, pngdata, pngdata.Bounds(), draw.Over, nil)
-
-		icondata := new(bytes.Buffer)
-		writer := bufio.NewWriter(icondata)
-		err = png.Encode(writer, rawdata)
-		if err != nil {
-			return err
+		var (
+			rect   = image.Rect(0, 0, int(size), int(size))
+			raw    = image.NewRGBA(rect)
+			buffer = bytes.NewBuffer(nil)
+			scale  = draw.CatmullRom
+		)
+		scale.Scale(raw, rect, src, src.Bounds(), draw.Over, nil)
+		if err := png.Encode(buffer, raw); err != nil {
+			return fmt.Errorf("encoding png data into ico: %w", err)
 		}
-		writer.Flush()
-
 		imgSize := size
 		if imgSize >= 256 {
 			imgSize = 0
 		}
-
-		data := icondata.Bytes()
-
-		icn := Container{
+		data := buffer.Bytes()
+		icons = append(icons, Container{
 			Header: Descriptor{
 				width:  uint8(imgSize),
 				height: uint8(imgSize),
@@ -82,38 +67,25 @@ func FromPNG(pngfile string, iconfile string) error {
 				size:   uint32(len(data)),
 			},
 			Data: data,
-		}
-		icons = append(icons, icn)
+		})
 	}
-
-	outfile, err := os.Create(iconfile)
-	if err != nil {
-		return err
-	}
-	defer outfile.Close()
-
-	ico := Header{
+	if err := binary.Write(dst, binary.LittleEndian, Header{
 		imageType:  1,
 		imageCount: uint16(len(sizes)),
+	}); err != nil {
+		return fmt.Errorf("writing ico header: %w", err)
 	}
-	err = binary.Write(outfile, binary.LittleEndian, ico)
-	if err != nil {
-		return err
-	}
-
 	offset := uint32(6 + 16*len(sizes))
 	for _, icon := range icons {
 		icon.Header.offset = offset
-		err = binary.Write(outfile, binary.LittleEndian, icon.Header)
-		if err != nil {
-			return err
+		if err := binary.Write(dst, binary.LittleEndian, icon.Header); err != nil {
+			return fmt.Errorf("writing icon headers: %w", err)
 		}
 		offset += icon.Header.size
 	}
 	for _, icon := range icons {
-		_, err = outfile.Write(icon.Data)
-		if err != nil {
-			return err
+		if _, err := dst.Write(icon.Data); err != nil {
+			return fmt.Errorf("writing icon data: %w", err)
 		}
 	}
 	return nil

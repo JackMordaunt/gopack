@@ -1,8 +1,11 @@
 package gopack
 
 import (
+	"bytes"
 	"fmt"
+	"image"
 	"image/png"
+	"io"
 	"io/ioutil"
 	"log"
 	"os"
@@ -12,6 +15,7 @@ import (
 	"sync"
 
 	"git.sr.ht/~jackmordaunt/gopack/ico"
+	"git.sr.ht/~jackmordaunt/gopack/internal/util"
 	"github.com/akavel/rsrc/rsrc"
 	"github.com/jackmordaunt/icns"
 )
@@ -65,32 +69,31 @@ type FlagSet struct {
 	Linker []string
 }
 
-// MetaData contains paths to meta files such as icon and manifests.
-//
-// TODO Specify data in a common format (eg, yml).
-// Grab common data author, description, etc and allow for custom data.
-// Then, generate the platform specific files or skip that and directly embed
-// the meta data (eg windows manifest).
-//
+// MetaData pulls together all platform specific metadata require to create a
+// bundle.
 type MetaData struct {
-	Icon   string
+	// Icon contains the image data for the icon.
+	Icon   image.Image
 	Darwin struct {
-		ICNS  string
-		Plist string
-		// Note: anything else?
+		// ICNS contains icon encoded as ICNS.
+		ICNS io.Reader
+		// Plist contains the Info.plist metadata file.
+		Plist io.Reader
 	}
 	Windows struct {
-		ICO      string
-		Manifest string
+		// ICO contains icon encoded as ICO.
+		ICO io.Reader
+		// Manifest contains the windows manifest metadata file.
+		Manifest io.Reader
 	}
 	Linux struct {
-		// TODO flatpack, snap, appimage?
+		// @Todo linux metadata stuff. flatpack, snap, appimage.
 	}
 }
 
 // Artifact associates a path to a binary with the platform it's intended for.
 type Artifact struct {
-	Binary string
+	Binary io.Reader
 	Target
 }
 
@@ -236,7 +239,7 @@ func (p Packer) Pack() error {
 		if err := p.MetaData.Load(p.Info.Root); err != nil {
 			return fmt.Errorf("loading metadata: %w", err)
 		}
-		if p.MetaData.Icon == "" {
+		if p.MetaData.Icon == nil {
 			fmt.Printf("warning: icon not found (icon.png)\n")
 		}
 		if err := p.Compile(); err != nil {
@@ -259,28 +262,29 @@ func (p Packer) Pack() error {
 			case Darwin:
 				if err := bundleMacOS(
 					dir,
+					p.Info.Name,
 					artifact.Binary,
 					p.MetaData.Darwin.ICNS,
 					p.MetaData.Darwin.Plist,
-					p.Info.Name,
 				); err != nil {
 					fmt.Printf("bundling macos: %s\n", err)
 				}
 			case Windows:
 				if err := bundleWindows(
-					dir,
+					filepath.Join(dir, fmt.Sprintf("%s.exe", p.Info.Name)),
 					artifact.Binary,
 				); err != nil {
 					fmt.Printf("bundling windows: %s\n", err)
 				}
 			case Linux:
-				if err := bundleLinux(
-					dir,
-					artifact.Binary,
-					"",
-				); err != nil {
-					fmt.Printf("bundling linux: %s\n", err)
-				}
+				fmt.Printf("warning: bundle ignored\n")
+				// if err := bundleLinux(
+				// 	dir,
+				// 	artifact.Binary,
+				// 	"",
+				// ); err != nil {
+				// 	fmt.Printf("bundling linux: %s\n", err)
+				// }
 			}
 		}()
 	}
@@ -360,14 +364,27 @@ func (p *Packer) Compile() error {
 				// TODO reify "precompile" step to capture this edge cases.
 				// ENHANCE editing PE binary data inline, without creating a .syso file would be
 				// more robust.
-				if platform == Windows && p.MetaData.Windows.ICO != "" {
-					resource := filepath.Join(sandbox, "rsrc.syso")
-					if err := rsrc.Embed(resource, arch.String(), "", p.MetaData.Windows.ICO); err != nil {
-						return fmt.Errorf("windows: creating icon resource: %w", err)
+				if platform == Windows && p.MetaData.Windows.ICO != nil {
+					if err := func() error {
+						var (
+							resource = filepath.Join(sandbox, "rsrc.syso")
+							path     = filepath.Join(os.TempDir(), "gopack", "icon.ico")
+						)
+						buffer, err := ioutil.ReadAll(p.MetaData.Windows.ICO)
+						if err != nil {
+							return fmt.Errorf("reading ico data: %w", err)
+						}
+						if err := ioutil.WriteFile(path, buffer, 0777); err != nil {
+							return fmt.Errorf("writing icon file to temporary location: %w", err)
+						}
+						if err := rsrc.Embed(resource, arch.String(), "", path); err != nil {
+							return fmt.Errorf("creating icon resource: %w", err)
+						}
+						return nil
+					}(); err != nil {
+						return fmt.Errorf("windows: %w", err)
 					}
-					defer os.Remove(resource)
 				}
-				// TODO target-specific linker and compiler flags.
 				cmd := exec.Command(
 					"go", "build",
 					"-o", bin,
@@ -388,8 +405,12 @@ func (p *Packer) Compile() error {
 						return fmt.Sprintf("%s: ", strings.TrimSpace(string(out)))
 					}(), err)
 				}
+				data, err := ioutil.ReadFile(bin)
+				if err != nil {
+					return fmt.Errorf("reading binary: %w", err)
+				}
 				p.Artifacts = append(p.Artifacts, Artifact{
-					Binary: bin,
+					Binary: bytes.NewBuffer(data),
 					Target: target,
 				})
 				return nil
@@ -418,85 +439,70 @@ func (p Packer) Output() string {
 }
 
 // Load metadata using defaults if not specified.
+// For icons and other resources this means buffering the files in memory.
 func (md *MetaData) Load(root string) error {
 	finder := Finder{Root: root}
-	if md.Icon == "" {
+	if md.Icon == nil {
 		icon, err := finder.Find("icon.png")
 		if err != nil {
-			return fmt.Errorf("icon: %w", err)
+			return fmt.Errorf("finding icon: %w", err)
 		}
 		if icon != "" {
-			md.Icon = icon
+			fmt.Printf("icon: %v\n", icon)
+			iconby, err := ioutil.ReadFile(icon)
+			if err != nil {
+				return fmt.Errorf("reading icon: %w", err)
+			}
+			img, err := png.Decode(bytes.NewBuffer(iconby))
+			if err != nil {
+				return fmt.Errorf("decoding icon: %w", err)
+			}
+			md.Icon = img
+		} else {
+			fmt.Printf("warning: icon not found\n")
 		}
 	}
-	if md.Darwin.ICNS == "" && md.Icon != "" {
-		icns := filepath.Join(os.TempDir(), "gopack", "icon.icns")
-		if err := convertIcon(md.Icon, icns); err != nil {
-			return err
+	if md.Darwin.ICNS == nil && md.Icon != nil {
+		buffer := bytes.NewBuffer(nil)
+		if err := icns.Encode(buffer, md.Icon); err != nil {
+			return fmt.Errorf("icns: converting icon: %w", err)
 		}
-		md.Darwin.ICNS = icns
+		md.Darwin.ICNS = util.NewCopyBuffer(buffer.Bytes())
 	}
-	if md.Windows.ICO == "" && md.Icon != "" {
-		ico := filepath.Join(os.TempDir(), "gopack", "icon.ico")
-		if err := convertIcon(md.Icon, ico); err != nil {
-			return err
-		}
-		md.Windows.ICO = ico
-	}
-	if md.Darwin.Plist == "" {
+	if md.Darwin.Plist == nil {
 		plist, err := finder.Find("Info.plist")
 		if err != nil {
 			return fmt.Errorf("Info.plist: %w", err)
 		}
-		md.Darwin.Plist = plist
+		if plist != "" {
+			by, err := ioutil.ReadFile(plist)
+			if err != nil {
+				return fmt.Errorf("reading %s: %w", plist, err)
+			}
+			md.Darwin.Plist = util.NewCopyBuffer(by)
+		}
 	}
-	if md.Windows.Manifest == "" {
-		// TODO pattern matching search?
+	if md.Windows.ICO == nil && md.Icon != nil {
+		buffer := bytes.NewBuffer(nil)
+		if err := ico.FromPNG(buffer, md.Icon); err != nil {
+			return fmt.Errorf("ico: converting icon: %w", err)
+		}
+		md.Windows.ICO = util.NewCopyBuffer(buffer.Bytes())
+	}
+	if md.Windows.Manifest == nil {
 		manifest, err := finder.Find("manifest")
 		if err != nil {
 			return fmt.Errorf("manifest: %w", err)
 		}
-		md.Windows.Manifest = manifest
+		if manifest != "" {
+			by, err := ioutil.ReadFile(manifest)
+			if err != nil {
+				return fmt.Errorf("reading %s: %w", manifest, err)
+			}
+			md.Windows.Manifest = util.NewCopyBuffer(by)
+		}
 	}
 	// TODO load linux meta data.
-	return nil
-}
-
-// convertIcon converts the source png ether icns or ico based on dst file
-// extension {.icns,ico}.
-func convertIcon(src, dst string) error {
-	switch filepath.Ext(dst) {
-	case ".icns":
-		if err := func() error {
-			srcf, err := os.Open(src)
-			if err != nil {
-				return fmt.Errorf("opening source file: %w", err)
-			}
-			defer srcf.Close()
-			img, err := png.Decode(srcf)
-			if err != nil {
-				return fmt.Errorf("decoding source png: %w", err)
-			}
-			_ = os.MkdirAll(filepath.Dir(dst), 0777)
-			dstf, err := os.OpenFile(dst, os.O_CREATE|os.O_RDWR, 0644)
-			if err != nil {
-				return fmt.Errorf("opening destination file: %w", err)
-			}
-			defer dstf.Close()
-			if err := icns.Encode(dstf, img); err != nil {
-				return fmt.Errorf("encoding: %w", err)
-			}
-			return nil
-		}(); err != nil {
-			return fmt.Errorf("converting to .icns: %w", err)
-		}
-	case ".ico":
-		if err := ico.FromPNG(src, dst); err != nil {
-			return fmt.Errorf("converting to .ico: %w", err)
-		}
-	default:
-		return fmt.Errorf("cannot handle %q", filepath.Ext(dst))
-	}
 	return nil
 }
 
