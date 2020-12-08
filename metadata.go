@@ -8,7 +8,7 @@ import (
 	"io"
 	"io/ioutil"
 
-	"git.sr.ht/~jackmordaunt/gopack/ico"
+	"git.sr.ht/~jackmordaunt/gopack/internal/ico"
 	"git.sr.ht/~jackmordaunt/gopack/internal/util"
 	"github.com/jackmordaunt/icns"
 )
