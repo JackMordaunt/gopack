@@ -4,10 +4,13 @@ package main
 
 import (
 	"fmt"
+	"io/ioutil"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"git.sr.ht/~jackmordaunt/gopack"
+	"github.com/akavel/rsrc/rsrc"
 )
 
 func main() {
@@ -58,6 +61,28 @@ func main() {
 						Linker: []string{"-H windowsgui"},
 					},
 				},
+			},
+			PreCompile: func(root string, md gopack.MetaData, t gopack.Target) error {
+				// @Enhance editing PE binary data inline, without creating a .syso file could be
+				// more robust.
+				if t.Platform == gopack.Windows && md.Windows.ICO != nil {
+					var (
+						resource = filepath.Join(root, "rsrc.syso")
+						path     = filepath.Join(os.TempDir(), "gopack", "icon.ico")
+					)
+					buffer, err := ioutil.ReadAll(md.Windows.ICO)
+					if err != nil {
+						return fmt.Errorf("reading ico data: %w", err)
+					}
+					if err := ioutil.WriteFile(path, buffer, 0777); err != nil {
+						return fmt.Errorf("writing icon file to temporary location: %w", err)
+					}
+					if err := rsrc.Embed(resource, t.Architecture.String(), "", path); err != nil {
+						return fmt.Errorf("creating icon resource: %w", err)
+					}
+					return nil
+				}
+				return nil
 			},
 		}
 		if err := packer.Pack(); err != nil {

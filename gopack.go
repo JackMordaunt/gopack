@@ -13,7 +13,6 @@ import (
 	"sync"
 
 	"git.sr.ht/~jackmordaunt/gopack/internal/util"
-	"github.com/akavel/rsrc/rsrc"
 )
 
 // Packer packs a project into native artifacts.
@@ -21,6 +20,10 @@ type Packer struct {
 	Info      *ProjectInfo
 	MetaData  MetaData
 	Artifacts []Artifact
+	// PreCompile is run prior to compiling.
+	// Allows modification of the compilation environment, such as generating a
+	// Windows resource file to be compiled in.
+	PreCompile func(root string, md MetaData, t Target) error
 }
 
 // ProjectInfo contains data required to compile a Go project.
@@ -339,28 +342,9 @@ func (p *Packer) Compile() error {
 				}).Copy(p.Info.Root, sandbox); err != nil {
 					return fmt.Errorf("creating sandbox: %w", err)
 				}
-				// TODO reify "precompile" step to capture this edge cases.
-				// ENHANCE editing PE binary data inline, without creating a .syso file would be
-				// more robust.
-				if platform == Windows && p.MetaData.Windows.ICO != nil {
-					if err := func() error {
-						var (
-							resource = filepath.Join(sandbox, "rsrc.syso")
-							path     = filepath.Join(os.TempDir(), "gopack", "icon.ico")
-						)
-						buffer, err := ioutil.ReadAll(p.MetaData.Windows.ICO)
-						if err != nil {
-							return fmt.Errorf("reading ico data: %w", err)
-						}
-						if err := ioutil.WriteFile(path, buffer, 0777); err != nil {
-							return fmt.Errorf("writing icon file to temporary location: %w", err)
-						}
-						if err := rsrc.Embed(resource, arch.String(), "", path); err != nil {
-							return fmt.Errorf("creating icon resource: %w", err)
-						}
-						return nil
-					}(); err != nil {
-						return fmt.Errorf("windows: %w", err)
+				if p.PreCompile != nil {
+					if err := p.PreCompile(sandbox, p.MetaData, target); err != nil {
+						return fmt.Errorf("pre compile: %w", err)
 					}
 				}
 				cmd := exec.Command(
