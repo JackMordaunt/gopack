@@ -216,9 +216,6 @@ func (p Packer) Pack() error {
 		if err := p.MetaData.Load(p.Info.Root); err != nil {
 			return fmt.Errorf("loading metadata: %w", err)
 		}
-		if p.MetaData.Icon == nil {
-			fmt.Printf("warning: icon not found (icon.png)\n")
-		}
 		if err := p.Compile(); err != nil {
 			return fmt.Errorf("compiling %s: %w", p.Info.Pkg, err)
 		}
@@ -254,14 +251,7 @@ func (p Packer) Pack() error {
 					fmt.Printf("bundling windows: %s\n", err)
 				}
 			case Linux:
-				fmt.Printf("warning: bundle ignored\n")
-				// if err := bundleLinux(
-				// 	dir,
-				// 	artifact.Binary,
-				// 	"",
-				// ); err != nil {
-				// 	fmt.Printf("bundling linux: %s\n", err)
-				// }
+				fmt.Printf("warning: bundling for linux unimplemented\n")
 			}
 		}()
 	}
