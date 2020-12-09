@@ -272,7 +272,7 @@ func (p Packer) Pack() error {
 // breaks compiles for other platforms.
 //
 // @Enhance is there a more lightweight strategy that supports windows resource
-// files?
+// files? Such as manipulating the compiled PE directly.
 func (p *Packer) Compile() error {
 	var (
 		output = p.Output()
@@ -336,7 +336,7 @@ func (p *Packer) Compile() error {
 		go func() {
 			defer wg.Done()
 			if err := func() error {
-				// @Enhance can we make this more semantic? EG: "prepare sandbox".
+				// @Enhance parse gitignore to figure out what to ignore.
 				if err := (util.Copier{
 					Recursive: true,
 					Ignore:    []string{"dist", ".git"},
