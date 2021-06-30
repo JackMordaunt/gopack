@@ -2,6 +2,7 @@ package gopack
 
 import (
 	"bytes"
+	_ "embed"
 	"fmt"
 	"image"
 	"image/png"
@@ -47,7 +48,6 @@ type MetaData struct {
 	}
 }
 
-// @OnHold this requires embed fs in next Go release 1.16 in feb 2021.
 //go:embed default.png
 var goIcon []byte
 
